@@ -14,10 +14,22 @@ library(tidyverse)
 library(igraph)
 ```
 
+When it comes to recommendation systems, the [MovieLens](https://movielens.org/) data set is the standard practice set to play with. Let's see what we can do. 
+
 ```{r, message = F}
 movies <- read_csv('ml-latest-small/movies.csv')
 ratings <- read_csv('ml-latest-small/ratings.csv')
 ```
+
+Let's take a small look at what we have:
+
+```{r}
+head(movies)
+
+head(ratings)
+```
+
+We will model the graph to have edges leave from users and point towards movie titles.
 
 ```{r}
 #people -[like]-> movies
@@ -34,14 +46,19 @@ g <- ratings %>%
 g
 ```
 
+Let's choose a random person to recommend movies to. 
+
 ```{r}
 person_of_interest <- '1'
 ```
 
+A node's **ego** is the subnetwork centered around it. Because we are working with a bipartite graph, all nodes surrounding user nodes represent all the movies that they rated. 
 
 ```{r}
 ego(g, order = 1, nodes = person_of_interest, mode = 'all', mindist = 0)
 ```
+
+Remember, we cannot use vertices from one graph to filter another graph. An ego is it's own graph. However, if we take away the names, then we can filter the original graph by matching the **name** attribute with the extracted character vector.
 
 ```{r}
 poi_ego <- g %>%
@@ -53,7 +70,6 @@ poi_ego
 ```
 
   
-  
 ```{r}
 #all movies person of interest likes
 poi_movies <- poi_ego %>%
@@ -64,11 +80,13 @@ poi_movies <- poi_ego %>%
 head(poi_movies)
 ```
 
+Now that we have all the movies our person of interest rated, we can use that information to find similar users. We will measure similarity by using the **Jaccard Similarity** metric. This is calculated by dividing the number of neighboring nodes two nodes share dby the total number of neighboring nodes for both of them. 
+
 ```{r, echo = F, out.width='250px'}
 # https://en.wikipedia.org/wiki/Jaccard_index
-knitr::include_graphics('Intersection_of_sets_A_and_B.png')
-knitr::include_graphics('Union_of_sets_A_and_B.png')
-knitr::include_graphics('Intersection_over_Union_-_poor,_good_and_excellent_score.png')
+knitr::include_graphics('img/Intersection_of_sets_A_and_B.png')
+knitr::include_graphics('img/Union_of_sets_A_and_B.png')
+knitr::include_graphics('img/Intersection_over_Union_-_poor,_good_and_excellent_score.png')
 ```
 
 
@@ -77,6 +95,7 @@ simscore <- similarity(g, mode = 'out')
 
 simscore[1:5, 1:5]
 ```
+
 
 ```{r}
 #Who are similar people?
@@ -92,6 +111,7 @@ poi_sim <- g %>%
   {. - V(.)[name %in% poi_movies]} 
 ```
 
+We want to compare movies between two users that are actually similar to eachother, so we will need to create a cutoff point we decide upon.
 
 ```{r}
 #pull just the people
@@ -106,6 +126,8 @@ q3 <- quantile(raters$simscore, .95)
 
 q3
 ```
+
+Now, we can filter out people we declare are not similar to our person of interest and then select moves that person of interest has not rated yet. 
 
 ```{r}
 poi_sim <- poi_sim %>%
@@ -141,6 +163,7 @@ poi_sim %>%
 
 
 ## Yeah, but does it work?
+
 
 ```{r}
 #let's get top movies 
