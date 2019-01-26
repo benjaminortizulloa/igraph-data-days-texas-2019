@@ -1,0 +1,313 @@
+---
+title: "Introduction to Igraph"
+author: "Benjamin Ortiz Ulloa"
+date: "1/26/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Getting Started
+
+**igraph** is an open source library for graph analysis written in C/C++. It has api wrappers written in R and Python. While there are other awesome packages in R like **statnet**'s **sna** package, **igraph** is the coolest and that is why we are covering it here today.
+
+Before we do anything however, we will need to install and load the package.
+
+```{r}
+#install.packages(c('igraph', 'nycflights13', 'purrr'))
+library(igraph)
+```
+
+## Creating a graph from nothing
+
+We can build a graph from scratch by simply initializing an empty graph object. This graph object has no nodes and no edges. It is a blank canvas for us to work on. 
+
+```{r}
+#initialize a graph
+g <- graph.empty(n = 0, directed = T)
+
+g
+```
+
+Please note the **D** in the summary. This means we have a **directed** graph and that every edge we add to it will have direction. If we entered `directed = F`, then the summary would display a **U**. The two **0**s represent the number of **vertices** and **edges** respectively.
+
+We can add attributes to the graph for clarification. This is useful if we want to share this graph with contributors or our future selves.
+
+```{r}
+g$name <- 'My First Graph'
+g$info <- "This is the first graph we wrote for Data Days Texas 2019's tutorial on igraph!"
+g$author <- 'Me!'
+
+g
+
+#access information like you would a data frame
+g$info
+```
+
+### Setting & Getting Vertices
+
+We can start adding vertices to the empty graph once it is initialized. This is done by providing the number of nodes we want and a list of node attributes.
+
+```{r}
+#add vertices
+g <- add_vertices(graph = g, nv = 5, attr = list(name = letters[1:5],
+                                                 type = c('vowel', rep('consonant', 3), 'vowel')))
+g
+```
+
+The **N** in the summary means that the vertices have a **name** attribute. **name** has a special utility for a graph which we will discuss shortly. The **B** signals that the graph is a **bipartite** graph. This comes up when the vertices have a **type** attribute. 
+
+We can access a graph's vertices
+
+```{r}
+#a vertex object is really just a vector of vertices
+V(g)
+
+#we can get information in tabular format if we use [[]]
+V(g)[[]]
+
+#we can even filter the vertices by their attributes
+V(g)[[type == 'vowel']]
+```
+
+Vertex objects are simply vectors of vertices. Attributes can be retrieved by using methods similar to those of a data frame.
+
+```{r}
+V(g)$type
+```
+
+We can even iterate over them, however, using base _apply methods isn't very helpful. It is better to use **purrr**'s mapping functions.
+
+```{r}
+#iterating over vertex object simply gives you the id
+lapply(V(g), function(x){x})
+
+#however, you can iterate over the attributes
+sapply(V(g)$type, function(x){paste("I'm a ", x)})
+
+### you can work with all attributes of a vertex with purrrr
+purrr::map(V(g), function(x){x})
+```
+
+### Setting & Getting Edges
+
+Adding edges to a graph is similar to adding vertices. One major difference howeer, is that the *edges* parameter takes a pairwise vector of vertices. For directed graphs the first vertex is where the edge is coming **from** and the second vertex is where the edge is going **to**. The order does not matter for undirected graphs.
+
+```{r}
+set.seed(4321)
+g <- add_edges(graph = g, 
+               edges = c('b', 'e',
+                         'e', 'a', 
+                         'a', 'd',
+                         'c', 'a'),
+               attr = list(weight = runif(4, 0, 1)))
+
+g
+```
+
+The **W** shown in the summary is the **weight** attribute. The significance of this value depends on the functions used and the particular graph application.
+
+We will not focus on plotting at this workshop, but now that we have a graph with both edges and vertices, it is worth showing how it is done. Please note that the cartesian coordinates (x and y coordinates) do not hold much significance and that the nodes and edges are positioned to reduce overlap. Also, please note that the euclidean distance between connected nodes are different for each edge. What do you thing this suggests about the edges weight? 
+
+```{r}
+set.seed(4321)
+plot(g)
+```
+
+Everything we have done with the vector of vertices we can also do with the vector of edges.
+
+```{r}
+E(g)
+
+E(g)[[]]
+
+E(g)[[weight >= .5]]
+
+E(g)$weight
+
+purrr::map(E(g), function(x){x})
+```
+
+There are some other cool functions we have to explore and filter the edges of a graph. These functions are helpful for filtering down information stored in edges.
+
+```{r}
+#where are the edges coming from?
+tail_of(graph = g, es = E(g))
+
+#where are the edges going to?
+head_of(graph = g, es = E(g))
+
+#what are edges that leave from 'e' and go to 'a'
+E(g)['e' %->% 'a']
+
+#what are edges that go to 'a' from 'e'
+E(g)['a' %<-% 'e']
+
+#what are edges that go to 'a' from any vertex?
+E(g)['a' %<-% V(g)]
+E(g)[to('a')]
+
+#what are edges that leave from 'a' to any vertex?
+E(g)[from('a')]
+
+#what are edges that either leave from or go to 'a'?
+E(g)['a' %--% V(g)]
+```
+
+## Using Magrittr's pipe
+
+**Magrittr**'s pipe (`%>%`) function is automatically loaded with igraph. While some may consider the use of a pipe a stylistic decision, others (myself) consider it a god send that minimizes the number of nested functions, get's rid of unnecessary naming, and allows us to incrementally build an object as we explore it.
+
+```{r}
+# this is the graph we made in the previous section
+set.seed(4321)
+g <- graph.empty(n = 0, directed = T)
+g <- add_vertices(graph = g, nv = 5, attr = list(name = letters[1:5],
+                                                 type = c('vowel', rep('consonant', 3), 'vowel')))
+g <- add_edges(graph = g, 
+               edges = c('b', 'e',
+                         'e', 'a', 
+                         'a', 'd',
+                         'c', 'a'),
+               attr = list(weight = runif(4, 0, 1)))
+
+V(g)[[]]
+
+E(g)[[]]
+```
+
+The following code does the same thing as the above code. Please note that the graph is simply called **g** and so removing the repetitive assignments (`<-`) doesn't necessarily save us typing and space. However, a lot of the times our scripts will have more descriptive (i.e. longer) names and continually typing them into a function can become burdensome.
+
+```{r}
+set.seed(4321)
+g <- graph.empty(n = 0, directed = T) %>%
+  add_vertices(nv = 5, attr = list(name = letters[1:5],
+                                   type = c('vowel', rep('consonant', 3), 'vowel'))) %>%
+  add_edges(edges = c('b', 'e',
+                      'e', 'a', 
+                      'a', 'd',
+                      'c', 'a'),
+            attr = list(weight = runif(4, 0, 1)))
+
+V(g)[[]]
+
+E(g)[[]]
+```
+
+Other than saving us from typing, the pipe does help us streamline common graph functions and ensures that we are using vertices and edges from the same graph. 
+
+```{r}
+g %>%
+  {. - E(.)[weight <= .4]} %>% #remove edges with low weight
+  {. - V(.)[degree(.) == 0]} #remove unconnected vertices
+```
+
+The below is a common error
+
+```{r, error = T}
+toRemove <- E(g)[weight <= .4]
+g - toRemove
+```
+
+## Creating a graph from a matrix
+
+Building a graph from scratch can get tedious. Luckily, we can use data from other formats to create a graph. A common transformation is creating a graph from a matrix. Generally, for non-bipartite graphs, the rownames should match the column names.
+
+```{r}
+set.seed(4321)
+m <- matrix(sample(c(0, 1), 5*5, T), nrow = 5, ncol = 5)
+rownames(m) <- letters[1:5]
+colnames(m) <- letters[1:5]
+
+m
+```
+
+For directed graphs, the rows represent where the edges are coming from and the columns represent where the edges are going to. 
+
+```{r}
+g <- graph_from_adjacency_matrix(adjmatrix = m, mode = 'directed')
+
+g
+
+set.seed(4321)
+plot(g)
+```
+
+You can also convert a graph back into a matrix. 
+
+```{r}
+as_adjacency_matrix(g)
+```
+
+A bipart graph can be created if the rownames are different from the column names. The rows and columns would represent different types of nodes.
+
+```{r}
+colnames(m) <- LETTERS[1:5]
+g <- graph_from_incidence_matrix(m, directed = F)
+
+g
+
+set.seed(4321)
+plot(g)
+```
+
+Again, this graph can be converted back to a matrix.
+
+```{r}
+as_incidence_matrix(g)
+```
+
+Information from one matrix graph can be added to another matrix graph by calling transposing the ends of a graph's edges and adding it to the other graph.
+
+```{r}
+ends(g, E(g))
+
+ends(g, E(g)) %>% t
+
+g + edges(ends(g, E(g)) %>% t)
+```
+
+## Creating a graph from a data frame
+
+Before we start creating graphs from data frames, let's create a data frame from a graph now that we have a simple graph.
+
+```{r}
+as_data_frame(g, what = 'both')
+```
+
+```{r}
+node_list <- nycflights13::airports %>%
+  dplyr::select(faa, x = lon, y = lat, tzone) 
+
+head(node_list)
+```
+
+```{r}
+edge_list <- nycflights13::flights %>% 
+  dplyr::select(origin, dest, flight) %>%
+  dplyr::distinct() %>%
+  dplyr::filter(origin %in% node_list$faa,
+                dest %in% node_list$faa)
+
+head(edge_list)
+```
+
+
+```{r}
+g <- graph_from_data_frame(d = edge_list, directed = T, vertices = node_list)
+plot(g)
+```
+
+```{r}
+g %>%
+  {. - V(.)[!grepl('America', tzone)]} %>%
+  {. - V(.)[grepl('Anchor', tzone)]} %>%
+  plot(
+    vertex.size = 3, 
+    vertex.label = '',
+    edge.arrow.size = .1,
+    edge.arrow.width = .2
+  )
+```
