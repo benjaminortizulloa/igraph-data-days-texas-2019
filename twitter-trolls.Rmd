@@ -46,7 +46,7 @@ tweet_hashtag_edges <- tweet_hashtag %>%
          hashtags = paste0('#', hashtags) #prevent duplicate node names
          ) 
 
-tweet_hashtag_edges
+head(tweet_hashtag_edges)
 ```
 
 We now have an edge list with enough information to get started. We should give the nodes plotting attributes so we can plot the graph later.
@@ -256,6 +256,8 @@ hashtag_community_summary %>%
 
 ## Text Analysis
 
+[Please take a look at the corresponding slides before continuing](img/Modeling & Graphing Text.pdf)
+
 The theme of tagging a node is important because we don't always have direct connections to determine if two nodes are related. Community detection relies on the network's structure. Luckily, we have text stored in the nodes so another option that we have for identifying nodes is topic modelling. 
 
 ```{r}
@@ -296,7 +298,7 @@ topic_model_hash
 
 One of the return values of the STM model is a beta value which tells us the probability a word belongs to a topic. 
 
-```{r}
+```{r, out.width = '1000px', out.height= '1000px'}
 td_beta_hash <- tidy(topic_model_hash)
 
 td_beta_hash %>%
