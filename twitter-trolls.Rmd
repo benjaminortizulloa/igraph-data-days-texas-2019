@@ -10,12 +10,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 
-```{r}
+```{r, message = F}
 library(tidyverse)
 library(igraph)
 ```
 
-```{r}
+```{r, message=F}
 tweets <- read_csv('russian-troll-tweets/tweets.csv')
 users <- read_csv('russian-troll-tweets/users.csv')
 ```
@@ -23,21 +23,22 @@ users <- read_csv('russian-troll-tweets/users.csv')
 ```{r}
 tweet_hashtag <- tweets %>% 
   filter(hashtags != '[]') %>%
-  select(user_key, hashtags, text) %>%
   mutate(hashtags = map(hashtags, jsonlite::fromJSON)) %>%
+  select(user_key, hashtags, text) %>%
   unnest() 
 
-tweet_hashtag
+head(tweet_hashtag)
 ```
 
 ```{r}
+# user -[used hashtag]-> hashtag
 tweet_hashtag_edges <- tweet_hashtag %>%
   select(-text) %>%
   count(user_key, hashtags, sort = T) %>%
   rename(weight = n) %>%
   mutate(type = 'used_hashtag',
-         user_key = paste0('user_', user_key),
-         hashtags = paste0('hashtag_', hashtags)
+         user_key = paste0('@', user_key), #prevent duplicate node names
+         hashtags = paste0('#', hashtags) #prevent duplicate node names
          ) 
 
 tweet_hashtag_edges
@@ -59,7 +60,8 @@ tweet_hashtag_nodes <- bind_rows(
   )
 )
 
-tweet_hashtag_nodes
+set.seed(1234)
+sample_n(tweet_hashtag_nodes, 10) 
 ```
 
 ```{r}
@@ -69,6 +71,7 @@ tweet_hashtag_g <- tweet_hashtag_edges %>%
 tweet_hashtag_g
 ```
 
+```{r}
 summary(E(tweet_hashtag_g)$weight)
 
 tweet_hashtag_g_filtered <- tweet_hashtag_g %>%
@@ -78,7 +81,9 @@ tweet_hashtag_g_filtered <- tweet_hashtag_g %>%
 plot(tweet_hashtag_g_filtered, 
      vertex.label = '',
      edge.arrow.mode = '-')
+```
 
+```{r}
 tweet_hashtag_g_filtered_components <- components(tweet_hashtag_g_filtered)
 
 names(tweet_hashtag_g_filtered_components)
@@ -86,12 +91,12 @@ names(tweet_hashtag_g_filtered_components)
 tweet_hashtag_g_filtered_components %>% 
   groups() %>%
   map(head, n = 10)
+```
 
-# V(tweet_hashtag_g_filtered)$membership <- tweet_hashtag_g_filtered_components$membership
-
+```{r, message=F}
 tweet_hashtag_g_filtered %>%
   {
-    V(.)$type <- V(.)$type == 'user'; 
+    V(.)$type <- V(.)$type == 'user'; #boolean type is necessary for bipartite projection
     V(.)$degree <- degree(.);
     V(.)$weighted_degree <- strength(.);
     .
@@ -102,69 +107,45 @@ tweet_hashtag_g_filtered %>%
       V(x)$component <- components(x)$membership;
       return(x)
     })
-    hashtag_g <<- .$proj1;
-    user_g <<- .$proj2;
+    hashtag_g <<- .$proj1; #projection 1 is type FALSE
+    user_g <<- .$proj2; #projection 2 is type TRUE
   }
+```
 
-hashtag_communities_wt <- walktrap.community(hashtag_g)
+```{r}
+hashtag_communities <- walktrap.community(hashtag_g)
 
-hashtag_communities_wt %>% groups %>% map(function(grp){str_replace(grp, '^[^_]+_', '') %>% head(10)} )
+hashtag_communities %>% 
+  groups %>% 
+  map(function(grp){str_replace(grp, '^[^_]+_', '') %>% head(10)} )
+```
 
+```{r}
 tweet_hashtag %>%
-  # filter(hashtags == 'Texit')
+  filter(hashtags == 'Texit')
   # filter(hashtags == 'BTP')
-  filter(hashtags == 'PodernFamily')
+  # filter(hashtags == 'PodernFamily')
+```
 
-V(hashtag_g)$membership <- hashtag_communities_wt$membership
+```{r}
+V(hashtag_g)$membership <- hashtag_communities$membership
 
-vertex_clr_palette <- rainbow(hashtag_communities_wt %>% groups %>% length())
+vertex_clr_palette <- rainbow(hashtag_communities %>% groups %>% length())
 
 hashtag_g %>%
   plot(
     vertex.color = map_chr(V(.)$membership, function(x){vertex_clr_palette[x]}),
     vertex.label = ''
   )
+```
 
-# hashtag_g_component <<- hashtag_g %>%
-# {
-#   comps <- V(.)$component %>%
-#     unique()
-#   g <- .
-#   map(comps, function(i){
-#     g %>%
-#     {. - V(g)[component != i]}
-#   })
-# } 
-
-# map(hashtag_g_component, function(g){str_replace(V(g)$name, '^[^_]+_', '') %>% head(10)})
-
-
-
-# largest_hashtag_component <- hashtag_g_component[[1]]
-# 
-# set.seed(321)
-# largest_hashtag_component_communities <- spinglass.community(largest_hashtag_component)
-# 
-# largest_hashtag_component_communities %>% groups
-
-# tweet_hashtag <- tweets %>% 
-#   filter(hashtags != '[]') %>%
-#   select(user_key, hashtags, text) %>%
-#   mutate(hashtags = map(hashtags, jsonlite::fromJSON)) %>%
-#   unnest() 
-
-
-# largest_hashtag_component_communities$membership
-
+```{r}
 hashtag_community_summary <- hashtag_g %>%
-  # {V(.)$community <- largest_hashtag_component_communities$membership; .} %>%
   {
     E(.)$tailCommunity <- tail_of(., E(.))$membership;
     E(.)$headCommunity <- head_of(., E(.))$membership;
     .
-  }
-
-hashtag_community_summary <- hashtag_community_summary %>%
+  } %>%
   as_data_frame('both') %>%
   {
     el <- .$edges %>%
@@ -213,38 +194,47 @@ hashtag_community_summary <- hashtag_community_summary %>%
         .
       }
   } 
-hashtag_community_summary %>% 
-  # remove.edge.attribute('weight') %>%
-  plot(vertex.color = map_chr(V(.)$name, function(x){vertex_clr_palette[as.numeric(x)]}))
 
-png('img/twitter_trolls_grouped_text.png', 800, 600)
-set.seed(1)
+```
+
+```{r}
+hashtag_community_summary %>% 
+  plot(vertex.color = map_chr(V(.)$name, function(x){vertex_clr_palette[as.numeric(x)]}))
+```
+
+
+```{r, out.width = '1000px', out.height='1000px'}
 hashtag_community_summary %>%
   plot(
     vertex.label = V(.)$top_hashes,
-    vertex.label.cex = .75,
+    vertex.label.cex = .5,
     vertex.shape = 'none',
-    main = 'Twitter Troll Groups: Hashtags Common to Group') 
-dev.off()
+    main = 'Twitter Troll Groups: Hashtags Common to Group',
+    asp = 0) 
+```
 
-png('img/twitter_trolls_grouped_connection_text.png', 800, 600)
-set.seed(1)
+```{r, out.width = '1000px', out.height='1000px'}
 hashtag_community_summary %>%
   {. - V(.)[degree(.) == 0]} %>%
   plot(
     edge.label = E(.)$top_hashes,
-    edge.label.cex = .7,
+    edge.label.cex = .5,
     vertex.size = 5,
-    main = "Twitter Troll Groups: Hashtags Connecting two Groups"
+    main = "Twitter Troll Groups: Hashtags Connecting two Groups",
+    asp = 0
   )
-dev.off()
+```
 
-#=======================================#
-#---- Text Analysis---------------------#
-#=======================================#
 
+## Text Analysis
+
+```{r}
 library(tidytext)
 library(stm)
+```
+
+```{r}
+#https://juliasilge.com/blog/evaluating-stm/
 
 tidy_tweets <- tweet_hashtag %>%
   select(-hashtags) %>%
@@ -257,20 +247,32 @@ tidy_tweets <- tweet_hashtag %>%
          text = str_remove_all(text, 'http\\S+')) %>%
   filter(!is.na(text)) %>%
   unnest_tokens(word, text, token = "tweets") %>%
-  anti_join(get_stopwords()) %>%
+  anti_join(get_stopwords(), by = 'word') %>%
   filter(!str_detect(word, "[0-9]+")) %>%
   filter(word != 'rt')%>%
   count(user_key, word, sort = T)
 
+head(tidy_tweets)
+```
+
+```{r}
 tweets %>% 
   # filter(user_key == 'ameliebaldwin') %>% 
   filter(user_key == 'newspeakdaily') %>%
   select(text) %>%
-  filter(!str_detect(text, '^RT'))
+  filter(!str_detect(text, '^RT')) %>%
+  head()
+```
 
-# tweets_sparse <- tidy_tweets %>%
-#   cast_sparse(user_key, word, n)
-# 
+```{r, message = F}
+tweets_sparse <- tidy_tweets %>%
+  cast_sparse(user_key, word, n)
+
+tweets_sparse[1:5, 1:5]
+
+```
+
+```{r}
 # topic_model <- stm(tweets_sparse, K = ,
 #                    verbose = FALSE, init.type = "Spectral")
 
@@ -280,53 +282,89 @@ topic_model
 
 td_beta <- tidy(topic_model)
 
-png('img/twitter_trolls_topic_model_beta_users.png', 800, 600)
+td_beta
+```
+
+```{r}
 td_beta %>%
   filter(term != 'rt') %>%
   group_by(topic) %>%
   top_n(10, beta) %>%
   ungroup() %>%
+  group_by(topic) %>%
+  nest() %>%
+  mutate(data, imap(data, function(x, i){
+    x %>%
+      mutate(term = paste0(paste(rep(' ', i), collapse = '' ), term))
+  })) %>%
+  unnest()  %>%
+  arrange(desc(beta)) %>%
   mutate(topic = paste0("Topic ", topic)) %>%
-  ggplot(aes(term, beta, fill = as.factor(topic))) +
+  ggplot(aes(factor(term, rev(unique(term))), beta, fill = as.factor(topic))) +
   geom_col(alpha = 0.8, show.legend = FALSE) +
   facet_wrap(~ topic, scales = "free_y") +
   coord_flip() +
   labs(x = NULL, y = expression(beta),
        title = "Grouping of Users: Highest word probabilities for each topic",
        subtitle = "Different words are associated with different topics")
-dev.off()
+```
 
+
+```{r}
 td_gamma <- tidy(topic_model, matrix = "gamma",                    
                  document_names = rownames(tweets_sparse)) %>%
   arrange(document) 
+
+head(td_gamma, 12)
 
 categorize_users <- td_gamma %>%
   group_by(document) %>%
   top_n(1, gamma)
 
+head(categorize_users)
+```
+
+```{r}
 tidy_hash <- tweet_hashtag %>%
   select(-text) %>%
   count(user_key, hashtags, sort = T)
 
+head(tidy_hash)
+```
+
+```{r, message=F}
 tweets_sparse_hash <- tidy_hash %>%
   cast_sparse(user_key, hashtags, n)
 
-topic_model_hash <- stm(tweets_sparse_hash, K = 6,
-                        verbose = FALSE, init.type = "Spectral")
+tweets_sparse_hash[1:5, 1:5]
+```
 
-write_rds(topic_model_hash, 'created_data/twitter_troll_tweets_user_hash.rds')
+```{r}
+# topic_model_hash <- stm(tweets_sparse_hash, K = 6, 
+#                         verbose = FALSE, init.type = "Spectral")
 
+
+topic_model_hash <- read_rds('created_data/twitter_troll_tweets_user_hash.rds')
 topic_model_hash
+```
 
+
+```{r}
 td_beta_hash <- tidy(topic_model_hash)
 
-png('img/twitter_trolls_topic_model_beta_user_hash.png', 800, 600)
 td_beta_hash %>%
   filter(term != 'rt') %>%
   group_by(topic) %>%
   top_n(10, beta) %>%
   ungroup() %>%
   mutate(topic = paste0("Topic ", topic)) %>%
+  # group_by(topic) %>%
+  # nest() %>%
+  # mutate(data, imap(data, function(x, i){
+  #   x %>%
+  #     mutate(term = paste0(paste(rep(' ', i), collapse = '' ), term))
+  # })) %>%
+  # unnest()  %>%
   ggplot(aes(term, beta, fill = as.factor(topic))) +
   geom_col(alpha = 0.8, show.legend = FALSE, color = 'black') +
   facet_wrap(~ topic, scales = "free_y") +
@@ -336,8 +374,9 @@ td_beta_hash %>%
        subtitle = "Different words are associated with different topics") +
   scale_fill_brewer(type = 'qual') +
   theme_bw()
-dev.off()
+```
 
+```{r}
 td_gamma_hash <- tidy(topic_model_hash, matrix = "gamma",
                       document_names = rownames(tweets_sparse_hash)) %>%
   arrange(document)
@@ -353,19 +392,20 @@ colored_user_g <- user_g %>%
   {
     el <- .$edges %>%
       mutate(
-        from = str_remove(from, '^user_'),
-        to = str_remove(to, '^user_')
+        from = str_remove(from, '^@'),
+        to = str_remove(to, '^@')
       ) 
     
     nl <- .$vertices %>%
       remove_rownames() %>%
       select(-color) %>%
       mutate(
-        name = str_remove(name, '^user_')
+        name = str_remove(name, '^@')
       ) %>%
-      left_join(categorize_user) 
+      left_join(categorize_user, by = "name") 
     
     graph_from_data_frame(el, F, nl)
   }
 
 plot(colored_user_g, vertex.label = '')
+```
