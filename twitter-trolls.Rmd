@@ -15,26 +15,31 @@ library(tidyverse)
 library(igraph)
 ```
 
+At last year's Data Days Texas, Will Lyon spoke about [Neo4j's findings with regards to the 2016 Russian Twitter Trolls](https://neo4j.com/blog/story-behind-russian-twitter-trolls/). They were able to do this analysis on the data [NBC collected](https://www.kaggle.com/vikasg/russian-troll-tweets). Let's explore the same data set and see what we can learn.
+
 ```{r, message=F}
 tweets <- read_csv('russian-troll-tweets/tweets.csv')
-users <- read_csv('russian-troll-tweets/users.csv')
 ```
+
+To start off we'll only need the users' identification key and their hashtag information. We'll also need the text of the tweets for future referece. 
 
 ```{r}
 tweet_hashtag <- tweets %>% 
-  filter(hashtags != '[]') %>%
-  mutate(hashtags = map(hashtags, jsonlite::fromJSON)) %>%
-  select(user_key, hashtags, text) %>%
+  filter(hashtags != '[]') %>% #this represents a tweet with no hashtags
+  mutate(hashtags = map(hashtags, jsonlite::fromJSON)) %>% #the stored info is a json file
+  select(user_key, hashtags, text) %>% 
   unnest() 
 
 head(tweet_hashtag)
 ```
 
+Since we are only working with an edge list, we should create a directed graph in which people point to hashtags. This is useful since we can infer a node type by where it lies on a given edge.
+
 ```{r}
 # user -[used hashtag]-> hashtag
 tweet_hashtag_edges <- tweet_hashtag %>%
   select(-text) %>%
-  count(user_key, hashtags, sort = T) %>%
+  count(user_key, hashtags, sort = T) %>% #aggregatign user-hashtag occurances
   rename(weight = n) %>%
   mutate(type = 'used_hashtag',
          user_key = paste0('@', user_key), #prevent duplicate node names
@@ -43,6 +48,8 @@ tweet_hashtag_edges <- tweet_hashtag %>%
 
 tweet_hashtag_edges
 ```
+
+We now have an edge list with enough information to get started. We should give the nodes plotting attributes so we can plot the graph later.
 
 ```{r}
 tweet_hashtag_nodes <- bind_rows(
@@ -60,8 +67,6 @@ tweet_hashtag_nodes <- bind_rows(
   )
 )
 
-set.seed(1234)
-sample_n(tweet_hashtag_nodes, 10) 
 ```
 
 ```{r}
@@ -71,9 +76,12 @@ tweet_hashtag_g <- tweet_hashtag_edges %>%
 tweet_hashtag_g
 ```
 
-```{r}
+This is a big graph. This will look like a gian hair ball if we plot it. Also, we are only interested in frequent person-hashtag connections. Let's take a look  at the weight distribution.
+
+```{r, out.width = '1000px'}
 summary(E(tweet_hashtag_g)$weight)
 
+# let's filter the graph down 
 tweet_hashtag_g_filtered <- tweet_hashtag_g %>%
   {. - E(.)[weight <= 5]} %>%
   {. - V(.)[degree(.) == 0]}
@@ -83,7 +91,10 @@ plot(tweet_hashtag_g_filtered,
      edge.arrow.mode = '-')
 ```
 
+From the looks of it, the is not a complete graph. That is, not every node can be connected with every other node. This shows that their are different groups, or component. Let's take a look at the differentcomponents
+
 ```{r}
+
 tweet_hashtag_g_filtered_components <- components(tweet_hashtag_g_filtered)
 
 names(tweet_hashtag_g_filtered_components)
@@ -92,6 +103,8 @@ tweet_hashtag_g_filtered_components %>%
   groups() %>%
   map(head, n = 10)
 ```
+
+The smaller components are made up of just one user tweeting about a topic very frequently. Let's dig deeper into this information and see how the hashtags relate to eachother. Hashtags are connected to other hashtags by people who use them. If many people use the same two hashtags, then we can safely assume that they are related in some way.
 
 ```{r, message=F}
 tweet_hashtag_g_filtered %>%
@@ -110,7 +123,14 @@ tweet_hashtag_g_filtered %>%
     hashtag_g <<- .$proj1; #projection 1 is type FALSE
     user_g <<- .$proj2; #projection 2 is type TRUE
   }
+
+set.seed(4321)
+plot(hashtag_g, vertex.size = 3, vertex.label = '')
+
 ```
+
+There is a large component within the tweets. We can distiguish them by using a community detection algorithm and marking the nodes according to their community. The **walktrap algorthm** uses a series of random walks to determine who are in the same community.
+
 
 ```{r}
 hashtag_communities <- walktrap.community(hashtag_g)
@@ -120,6 +140,8 @@ hashtag_communities %>%
   map(function(grp){str_replace(grp, '^[^_]+_', '') %>% head(10)} )
 ```
 
+While some of these tweets look somewhat normal, they take on a completely different tone once we understand that they come from a troll.
+
 ```{r}
 tweet_hashtag %>%
   filter(hashtags == 'Texit')
@@ -127,11 +149,14 @@ tweet_hashtag %>%
   # filter(hashtags == 'PodernFamily')
 ```
 
+We can mark the nodes according to the community algorithm. The order of membership information returned from the algorithm corresponds to the order of the vertices of the graph used.
+
 ```{r}
 V(hashtag_g)$membership <- hashtag_communities$membership
 
-vertex_clr_palette <- rainbow(hashtag_communities %>% groups %>% length())
+vertex_clr_palette <- rainbow(hashtag_communities %>% groups %>% length()) #simple color palette
 
+set.seed(4321)
 hashtag_g %>%
   plot(
     vertex.color = map_chr(V(.)$membership, function(x){vertex_clr_palette[x]}),
@@ -139,11 +164,13 @@ hashtag_g %>%
   )
 ```
 
+We can create super nodes that represent the community's discovered. The edges between the super nodes would represent users who tweeted hashtags from both.
+
 ```{r}
 hashtag_community_summary <- hashtag_g %>%
   {
-    E(.)$tailCommunity <- tail_of(., E(.))$membership;
-    E(.)$headCommunity <- head_of(., E(.))$membership;
+    E(.)$tailCommunity <- tail_of(., E(.))$membership; #store node information in edges 
+    E(.)$headCommunity <- head_of(., E(.))$membership; #to refrence later
     .
   } %>%
   as_data_frame('both') %>%
@@ -188,7 +215,7 @@ hashtag_community_summary <- hashtag_g %>%
     set.seed(4321)
     graph_from_data_frame(el, F, nl) %>%
       {
-        l <- layout_nicely(.)
+        l <- layout_nicely(.) #store layout information in vertices
         V(.)$x <- l[,1]
         V(.)$y <- l[,2]
         .
@@ -196,6 +223,7 @@ hashtag_community_summary <- hashtag_g %>%
   } 
 
 ```
+
 
 ```{r}
 hashtag_community_summary %>% 
@@ -228,109 +256,25 @@ hashtag_community_summary %>%
 
 ## Text Analysis
 
+The theme of tagging a node is important because we don't always have direct connections to determine if two nodes are related. Community detection relies on the network's structure. Luckily, we have text stored in the nodes so another option that we have for identifying nodes is topic modelling. 
+
 ```{r}
 library(tidytext)
 library(stm)
 ```
 
+Topic modelling typically requires a form of document-term matrix. This is simply a matrix that counts the occurance of a particular word in a particular document. This requires us to figure out to extract word frequencies. This would normally involve tokenization and the removal of stop word's, but another beautiful thing about working with twitter data is that the hashtags themselves are tokenized words. 
+
 ```{r}
 #https://juliasilge.com/blog/evaluating-stm/
-
-tidy_tweets <- tweet_hashtag %>%
-  select(-hashtags) %>%
-  distinct() %>%
-  mutate(text = str_replace_all(text, "&#x27;|&quot;|&#x2F;", "'"), ## weird encoding
-         text = str_replace_all(text, "<a(.*?)>", " "),             ## links 
-         text = str_replace_all(text, "&gt;|&lt;|&amp;", " "),      ## html yuck
-         text = str_replace_all(text, "&#[:digit:]+;", " "),        ## html yuck
-         text = str_remove_all(text, "<[^>]*>"),                    ## mmmmm, more html yuck
-         text = str_remove_all(text, 'http\\S+')) %>%
-  filter(!is.na(text)) %>%
-  unnest_tokens(word, text, token = "tweets") %>%
-  anti_join(get_stopwords(), by = 'word') %>%
-  filter(!str_detect(word, "[0-9]+")) %>%
-  filter(word != 'rt')%>%
-  count(user_key, word, sort = T)
-
-head(tidy_tweets)
-```
-
-```{r}
-tweets %>% 
-  # filter(user_key == 'ameliebaldwin') %>% 
-  filter(user_key == 'newspeakdaily') %>%
-  select(text) %>%
-  filter(!str_detect(text, '^RT')) %>%
-  head()
-```
-
-```{r, message = F}
-tweets_sparse <- tidy_tweets %>%
-  cast_sparse(user_key, word, n)
-
-tweets_sparse[1:5, 1:5]
-
-```
-
-```{r}
-# topic_model <- stm(tweets_sparse, K = ,
-#                    verbose = FALSE, init.type = "Spectral")
-
-topic_model <- read_rds('created_data/twitter_troll_tweets_users.rds')
-
-topic_model
-
-td_beta <- tidy(topic_model)
-
-td_beta
-```
-
-```{r}
-td_beta %>%
-  filter(term != 'rt') %>%
-  group_by(topic) %>%
-  top_n(10, beta) %>%
-  ungroup() %>%
-  group_by(topic) %>%
-  nest() %>%
-  mutate(data, imap(data, function(x, i){
-    x %>%
-      mutate(term = paste0(paste(rep(' ', i), collapse = '' ), term))
-  })) %>%
-  unnest()  %>%
-  arrange(desc(beta)) %>%
-  mutate(topic = paste0("Topic ", topic)) %>%
-  ggplot(aes(factor(term, rev(unique(term))), beta, fill = as.factor(topic))) +
-  geom_col(alpha = 0.8, show.legend = FALSE) +
-  facet_wrap(~ topic, scales = "free_y") +
-  coord_flip() +
-  labs(x = NULL, y = expression(beta),
-       title = "Grouping of Users: Highest word probabilities for each topic",
-       subtitle = "Different words are associated with different topics")
-```
-
-
-```{r}
-td_gamma <- tidy(topic_model, matrix = "gamma",                    
-                 document_names = rownames(tweets_sparse)) %>%
-  arrange(document) 
-
-head(td_gamma, 12)
-
-categorize_users <- td_gamma %>%
-  group_by(document) %>%
-  top_n(1, gamma)
-
-head(categorize_users)
-```
-
-```{r}
 tidy_hash <- tweet_hashtag %>%
   select(-text) %>%
   count(user_key, hashtags, sort = T)
 
 head(tidy_hash)
 ```
+
+Once we have the term frequencies, we can store the counts in the intersection of the words and documents.
 
 ```{r, message=F}
 tweets_sparse_hash <- tidy_hash %>%
@@ -339,15 +283,18 @@ tweets_sparse_hash <- tidy_hash %>%
 tweets_sparse_hash[1:5, 1:5]
 ```
 
+We can then use the dtm to run a topic model. There are many topic modelling algorithms - a common one is the latent Dirichlet allocation - however, here we use a structural topic model. These algorithms genreally take some time 
+
 ```{r}
 # topic_model_hash <- stm(tweets_sparse_hash, K = 6, 
-#                         verbose = FALSE, init.type = "Spectral")
+#                         verbose = FALSE, init.type = "Spectral") 
 
 
 topic_model_hash <- read_rds('created_data/twitter_troll_tweets_user_hash.rds')
 topic_model_hash
 ```
 
+One of the return values of the STM model is a beta value which tells us the probability a word belongs to a topic. 
 
 ```{r}
 td_beta_hash <- tidy(topic_model_hash)
@@ -358,13 +305,6 @@ td_beta_hash %>%
   top_n(10, beta) %>%
   ungroup() %>%
   mutate(topic = paste0("Topic ", topic)) %>%
-  # group_by(topic) %>%
-  # nest() %>%
-  # mutate(data, imap(data, function(x, i){
-  #   x %>%
-  #     mutate(term = paste0(paste(rep(' ', i), collapse = '' ), term))
-  # })) %>%
-  # unnest()  %>%
   ggplot(aes(term, beta, fill = as.factor(topic))) +
   geom_col(alpha = 0.8, show.legend = FALSE, color = 'black') +
   facet_wrap(~ topic, scales = "free_y") +
@@ -376,6 +316,8 @@ td_beta_hash %>%
   theme_bw()
 ```
 
+We also have a gamma, which tells us the probability that a given document (or, in our case, troll) belongs to a particular topic.
+
 ```{r}
 td_gamma_hash <- tidy(topic_model_hash, matrix = "gamma",
                       document_names = rownames(tweets_sparse_hash)) %>%
@@ -386,6 +328,8 @@ categorize_user <- td_gamma_hash %>%
   top_n(1, gamma) %>%
   mutate(color = map_chr(topic, function(x){scales::brewer_pal('qual')(6)[x]})) %>%
   rename(name = document)
+
+categorize_user
 
 colored_user_g <- user_g %>% 
   as_data_frame('both') %>%
